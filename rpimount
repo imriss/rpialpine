@@ -1,0 +1,78 @@
+#!/bin/bash
+
+set -e
+
+basedir=$(cd $(dirname $0) && pwd)
+mountpoint=
+
+export PATH=$basedir:$PATH
+
+function _cleanup {
+    if test -n "$mountpoint"; then
+	mount | grep -q $mountpoint/boot && \
+	    $su umount $mountpoint/boot
+	mount | grep -q $mountpoint && \
+	    $su umount $mountpoint
+    fi
+}
+
+function _usage {
+    echo "Usage: $0 [-s,-h] /path/to/img mountpoint"
+    echo -e "\t-s:    start a shell"
+    echo -e "\t-h:    display help"
+}
+
+function _mount {
+    i=$1
+    $su mount -o offset=$(blkoffset $image 2),ro -t ext4 $image $mountpoint
+    $su mount -o offset=$(blkoffset $image 1),ro -t vfat $image $mountpoint/boot
+}
+
+shell=
+while getopts ":s" opt; do
+    case $opt in
+	s)
+	    trap _cleanup EXIT
+	    shell=1
+	    shift $((OPTIND-1))
+	    ;;
+	h)
+	    _usage
+	    exit 0
+	    ;;
+	\?)
+	    _usage
+	    exit 1
+    esac
+done
+
+if test $# -lt 2; then
+    _usage
+    exit 1
+fi
+
+if test ! -e $1; then
+    echo "E: Can not find image file: "$1
+    exit 1
+fi
+image=$1
+
+if test ! -d $2; then
+    echo "E: Please create mountpoint with 'mkdir -p $2'"
+    exit 1
+fi
+mountpoint=$(cd $2 && pwd)
+
+if test  `id -u` = 0; then
+    su=""
+else
+    su="sudo "
+fi
+
+_mount
+
+if test "x$shell" = "x1"; then
+    /bin/bash
+fi
+
+exit 0

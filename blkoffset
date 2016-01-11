@@ -1,0 +1,30 @@
+#!/bin/bash
+
+set -e
+
+mountpoint=
+fdisk=/sbin/sfdisk
+
+function _usage {
+    echo "Usage: $0 /path/to/img part_no"
+}
+
+if test $# -lt 2; then
+    _usage
+    exit 1
+fi
+
+if test ! -e $1; then
+    echo "E: Can not find image file: "$1
+    exit 1
+fi
+
+# Get absolute path
+image=$(dirname $1)/$(basename $1)
+blocks=$(LANG=C $fdisk -u S -d $image 2> /dev/null | \
+		awk 'BEGIN { table=0 } /^\s*$/ { table=1 } /^\// && table==1 { print $0 }' | \
+		sed 's/^.*://' | sed 's/ start=\s*\([0-9]\+\),.*/\1/' | \
+		tail -n +$2 | head -1)
+echo $(( blocks*512 ))
+
+exit 0

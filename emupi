@@ -1,0 +1,77 @@
+#!/bin/bash -e
+
+basedir=$(cd $(dirname $0) && pwd)
+tmpdir=$(mktemp -d)
+
+qemubindir=/opt/qemu-rpi/bin
+
+fdisk=/sbin/sfdisk
+
+export PATH=$basedir:$qemubindir:$PATH
+
+function _cleanup {
+    mount | grep -q $tmpdir/boot && \
+	umount $tmpdir/boot || true
+    mount | grep -q $tmpdir && \
+	umount $tmpdir || true
+    rm -rf $tmpdir
+}
+
+function _usage {
+    echo "Usage: $0 [-r] /path/to/image"
+}
+
+trap _cleanup EXIT
+
+if test `id -u` != 0; then
+    sudo $0 $*
+    exit 0
+fi
+
+if test $# -lt 1; then
+    _usage
+    exit 1
+fi
+
+opts=""
+while getopts ":r" opt; do
+    case $opt in
+	r)
+	    opts="$opts init=/bin/bash"
+	    shift $((OPTIND-1))
+	    ;;
+	h)
+	    _usage
+	    exit 0
+	    ;;
+	\?)
+	    _usage
+	    exit 1
+	    ;;
+    esac
+done
+
+image=$1
+if test ! -e $image; then
+    echo "E: unknown image file " $image
+    exit 1
+fi
+
+rpimount $image $tmpdir
+
+kernel=$tmpdir/boot/kernel.img
+
+cowimg=$(basename $image .bin)_$(date +%F-%H-%M-%S).bin
+qemu-img create -f qcow2 -o backing_file=$image $cowimg
+
+# The magic: https://www.raspberrypi.org/forums/viewtopic.php?f=72&t=26561
+qemu-system-arm \
+    -kernel $kernel \
+    -cpu arm1176 \
+    -m 512 \
+    -machine raspi \
+    -serial stdio \
+    -no-reboot \
+    -append "rw dma.dmachans=0x7f35 bcm2708_fb.fbwidth=1024 bcm2708_fb.fbheight=768 bcm2708.boardrev=0xf bcm2708.serial=0xcad0eedf smsc95xx.macaddr=B8:27:EB:D0:EE:DF sdhci-bcm2708.emmc_clock_freq=100000000 vc_mem.mem_base=0x1c000000 vc_mem.mem_size=0x20000000 dwc_otg.lpm_enable=0 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 elevator=deadline rootwait $opts" \
+    -usb -device usb-kbd -device usb-mouse \
+    -snapshot -sd $cowimg
